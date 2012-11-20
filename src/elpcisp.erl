@@ -33,7 +33,7 @@
 
 -define(SP, $\s).
 -define(is_addr(A), is_integer(A),((A) >= 0),((A) =< 16#ffffffff)).
--define(I(X), integer_to_list((X))).
+-define(i2l(X), integer_to_list((X))).
 
 -define(dbg(F,A), io:format((F)++"\n",(A))).
 %% -define(dbg(F,A), ok).
@@ -119,12 +119,12 @@ enter(U) ->
     ok.
 
 echo(U, true) ->
-    command(U, [$A,?SP,?I(1)]);
+    command(U, [$A,?SP,?i2l(1)]);
 echo(U, false) ->
-    command(U, [$A,?SP,?I(0)]).
+    command(U, [$A,?SP,?i2l(0)]).
 
 prepare_sector(U, A, B) when is_integer(A), is_integer(B), A >= 0, A =< B ->
-    command(U, [$P,?SP,?I(A),?SP,?I(B)]).
+    command(U, [$P,?SP,?i2l(A),?SP,?i2l(B)]).
 
 copy(U, Dst, Src, N) 
   when ?is_addr(Dst),(Dst band 16#ff) =:= 0,  ?is_addr(Src),
@@ -132,21 +132,21 @@ copy(U, Dst, Src, N)
 	orelse (N =:= 512) 
 	orelse (N =:= 1024) 
 	orelse (N =:= 4096)) ->
-    command(U, [$C,?SP,?I(Dst),?SP,?I(Src),?SP,?I(N)]).
+    command(U, [$C,?SP,?i2l(Dst),?SP,?i2l(Src),?SP,?i2l(N)]).
 	       
 go(U,Addr) ->
     go(U,Addr,arm).
 
 go(U,Addr,arm) when ?is_addr(Addr) ->
-    command(U, [$G,?SP,?I(Addr),?SP,$A]);
+    command(U, [$G,?SP,?i2l(Addr),?SP,$A]);
 go(U,Addr,thumb) when ?is_addr(Addr) ->
-    command(U, [$G,?SP,?I(Addr),?SP,$T]).
+    command(U, [$G,?SP,?i2l(Addr),?SP,$T]).
 
 erase_sector(U, A, B) when is_integer(A), is_integer(B), A >= 0, A =< B ->
-    command(U, [$E,?SP,?I(A),?SP,?I(B)]).
+    command(U, [$E,?SP,?i2l(A),?SP,?i2l(B)]).
 
 blank_check_sector(U, A, B) when is_integer(A), is_integer(B), A >= 0, A =< B ->
-    command(U, [$I,?SP,?I(A),?SP,?I(B)]).
+    command(U, [$I,?SP,?i2l(A),?SP,?i2l(B)]).
 
 read_device_type(U) ->
     case read_partid(U) of
@@ -172,10 +172,10 @@ read_version(U) ->
 compare(U, A1, A2, N) when ?is_addr(A1), ?is_addr(A2), 
 			   A1 band 3 =:= 0, A2 band 3 =:= 0,
 			   is_integer(N), N band 3 =:= 0 ->
-    command(U, [$M,?SP,?I(A1),?SP,?I(A2),?SP,?I(N)]).
+    command(U, [$M,?SP,?i2l(A1),?SP,?i2l(A2),?SP,?i2l(N)]).
 
 unlock(U) ->
-    command(U, [$U,?SP,?I(23130)]).
+    command(U, [$U,?SP,?i2l(23130)]).
 
 %%
 %%
@@ -185,7 +185,7 @@ write_memory(U, Addr, Data)
        byte_size(Data) band 3 =:= 0,
        byte_size(Data) =< ?UU_MAX_LINES*?UU_MAX_LINE_LENGTH ->
     N = byte_size(Data),
-    case command(U, [$W,?SP,?I(Addr),?SP,?I(N)]) of
+    case command(U, [$W,?SP,?i2l(Addr),?SP,?i2l(N)]) of
 	{ok,[]} ->
 	    write_data(U, elpcisp_uu:encode_csum(Data), 1000, 3);
 	Error ->
@@ -223,10 +223,9 @@ write_data(U, [], Lines0, Timeout, Resend) ->
 %% Byte count N must also be a multiple of 4
 %%
 read_memory(U, Addr, N) 
-  when ?is_addr(Addr), Addr band 3 =:= 0,
-       N band 16#00000003 =:= 0,
+  when ?is_addr(Addr), Addr band 3 =:= 0, N band 3 =:= 0,
        N =< ?UU_MAX_LINES*?UU_MAX_LINE_LENGTH ->
-    case command(U, [$R,?SP,?I(Addr),?SP,?I(N)]) of
+    case command(U, [$R,?SP,?i2l(Addr),?SP,?i2l(N)]) of
 	{ok, Lines} ->
 	    case elpcisp_uu:decode_csum(Lines) of
 		{ok,Data} ->
@@ -507,7 +506,7 @@ ramstart(DevType) ->
 
 
 %% @doc
-%%    Flash an firmware image stroed in an ihex file onto a device
+%%    Flash a firmware ihex-image from file onto a device
 %% @end
 -spec flash(Device::string()|port(), File::string()) -> ok | {error,term()}.
 
