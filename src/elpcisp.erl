@@ -25,6 +25,9 @@
 -export([write_memory/3]).
 -export([read_memory/3]).
 -export([flash/2]).
+-export([patch_segment/3]).
+-export([block_list/2]).
+-export([flash_block/4]).
 
 
 %% -compile(export_all).
