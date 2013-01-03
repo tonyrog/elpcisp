@@ -17,10 +17,12 @@
 %%
 %% uuencode. Encode binary into uu encoding.
 %%
--spec encode(Data::binary) -> [binary()].
+-spec encode(Data::binary()) -> {non_neg_integer(), [binary()]}.
 
 encode(Data) when byte_size(Data) =< ?UU_MAX_LINES*?UU_MAX_LINE_LENGTH ->
     encode_(Data, 0, 0, [], []).
+
+-spec encode_csum(Data::binary()) -> [binary()].
 
 encode_csum(Data) when byte_size(Data) =< ?UU_MAX_LINES*?UU_MAX_LINE_LENGTH ->
     {Sum,Lines} = encode_(Data, 0, 0, [], []),
@@ -42,8 +44,7 @@ encode_(<<X1>>,Sum,N,Acc,Lines) ->
     Line = uue_line(N+1,uue_cons(Y4,Y3,Y2,Y1,Acc)),
     uue_final(Line,Lines,X1+Sum);
 encode_(<<>>,Sum,0,[],Lines) ->
-    CheckLine = list_to_binary(?i2l(Sum band 16#ffffffff)),
-    reverse([CheckLine|Lines]);
+    {Sum, reverse(Lines)};
 encode_(<<>>,Sum,N,Acc,Lines) ->
     Line = uue_line(N, Acc),
     uue_final(Line,Lines,Sum).
