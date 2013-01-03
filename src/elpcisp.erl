@@ -43,18 +43,36 @@
 
 -include("elpcisp.hrl").
 
-
+%% @doc
+%%    Open a LPCx decide for flashing
+%% @end
+-spec open(Device::string()) ->
+		  {ok,uart:uart()} | {error,term()}.
 open(Device) ->
     open(Device,38400).
 
+%% @doc
+%%    Open a LPCx decide for flashing
+%% @end
+-spec open(Device::string(),Baud::integer()) ->
+		  {ok,uart:uart()} | {error,term()}.
 open(Device,Baud) ->
     uart:open(Device, [{baud,Baud},{active,false},{packet,0},{mode,binary}]).
 
+%% @doc
+%%   Sync will (try to) set the LPC circuit in programming mode.
+%% @end
+-spec sync(U::uart:uart()) -> ok | {error,term()}.
 sync(U) -> 
     sync_(U, -1, 500, "12000").
 
+-spec sync(U::uart:uart(),Retries::integer()) ->
+		  ok | {error,term()}.
 sync(U, N) when is_integer(N), N>0 -> 
     sync_(U, N, 500, "12000").
+
+-spec sync(U::uart:uart(),Retries::integer(),Tmo::timeout()) ->
+		  ok | {error,term()}.
 
 sync(U, N, Tmo) when is_integer(N), N>0, is_integer(Tmo), Tmo>0 ->
     sync_(U, N, Tmo, "12000").
@@ -110,7 +128,12 @@ wait_sync__(U,I,Tmo,Tmo0,Acc) ->
 		    sync__(U, I-1, Tmo0)
 	    end
     end.
-	    
+
+%% @doc
+%%    Enter programming mode
+%% @end
+-spec enter(uart:uart()) -> ok.
+		   
 enter(U) ->
     uart:set_modem(U, [dtr,rts]),
     timer:sleep(100),
@@ -121,14 +144,32 @@ enter(U) ->
     uart:clear_modem(U, [rts]),
     ok.
 
+%% @doc
+%%    Turn echo on or off
+%% @end
+-spec echo(uart:uart(), boolean()) -> ok.
+
 echo(U, true) ->
     command(U, [$A,?SP,?i2l(1)]);
 echo(U, false) ->
     command(U, [$A,?SP,?i2l(0)]).
 
+%% @doc
+%%    Prepare the all sectors from A to and including B to be 
+%%    erased or written to.
+%% @end
+-spec prepare_sector(U::uart:uart(),A::integer(),B::integer()) ->
+			    {ok,binary()} | {error,term()}.
 prepare_sector(U, A, B) when is_integer(A), is_integer(B), A >= 0, A =< B ->
     command(U, [$P,?SP,?i2l(A),?SP,?i2l(B)]).
 
+%% @doc
+%%    Copy N bytes of data from RAM address Dst 
+%%    to the flash starting at address Src. This is the
+%%    main flashing routine.
+%% @end
+-spec copy(U::uart:uart(),Dst::integer(),Src::integer(),N::integer()) ->
+		  {ok,binary()} | {error,term()}.
 copy(U, Dst, Src, N) 
   when ?is_addr(Dst),(Dst band 16#ff) =:= 0,  ?is_addr(Src),
        ((N =:= 256) 
@@ -136,20 +177,47 @@ copy(U, Dst, Src, N)
 	orelse (N =:= 1024) 
 	orelse (N =:= 4096)) ->
     command(U, [$C,?SP,?i2l(Dst),?SP,?i2l(Src),?SP,?i2l(N)]).
-	       
-go(U,Addr) ->
-    go(U,Addr,arm).
+
+%% @doc
+%%    Run the program found at address Addr
+%% @end
+
+-spec go(U::uart:uart(),Addr::integer(), arm|thumb) ->
+		{ok,binary()} | {error,term()}.
 
 go(U,Addr,arm) when ?is_addr(Addr) ->
     command(U, [$G,?SP,?i2l(Addr),?SP,$A]);
 go(U,Addr,thumb) when ?is_addr(Addr) ->
     command(U, [$G,?SP,?i2l(Addr),?SP,$T]).
 
+-spec go(U::uart:uart(),Addr::integer()) ->
+		{ok,binary()} | {error,term()}.
+
+go(U,Addr) ->
+    go(U,Addr,arm).
+
+%% @doc
+%%    Erase data on sectors from A to and including sector B
+%% @end
+-spec erase_sector(U::uart:uart(),A::integer(),B::integer()) ->
+			  {ok,binary()} | {error,term()}.
+
 erase_sector(U, A, B) when is_integer(A), is_integer(B), A >= 0, A =< B ->
     command(U, [$E,?SP,?i2l(A),?SP,?i2l(B)]).
 
+%% @doc
+%%    Check that all sectors from A to and including B are erased
+%% @end
+-spec blank_check_sector(U::uart:uart(),A::integer(),B::integer()) ->
+				{ok,binary()} | {error,term()}.
+
 blank_check_sector(U, A, B) when is_integer(A), is_integer(B), A >= 0, A =< B ->
     command(U, [$I,?SP,?i2l(A),?SP,?i2l(B)]).
+
+%% @doc
+%%    Get the device type record
+%% @end
+-spec read_device_type(U::uart:uart()) -> {ok,#device_type{}} | {error,term()}.
 
 read_device_type(U) ->
     case read_partid(U) of
@@ -161,6 +229,11 @@ read_device_type(U) ->
 	Error -> Error
     end.
 
+%% @doc
+%%    Read the circuit model number 
+%% @end
+-spec read_partid(uart:uart()) -> {ok,integer()} | {error,term()}.
+
 read_partid(U) ->
     case command(U, [$J]) of
 	{ok, [PartID]} ->
@@ -168,6 +241,11 @@ read_partid(U) ->
 	Error ->
 	    Error
     end.
+
+%% @doc
+%%    Read the boot program version number 
+%% @end
+-spec read_version(uart:uart()) -> {ok,integer()} | {error,term()}.
 
 read_version(U) ->
     command(U, [$K]).
@@ -177,12 +255,21 @@ compare(U, A1, A2, N) when ?is_addr(A1), ?is_addr(A2),
 			   is_integer(N), N band 3 =:= 0 ->
     command(U, [$M,?SP,?i2l(A1),?SP,?i2l(A2),?SP,?i2l(N)]).
 
+
+%% @doc
+%%    Unlock flash memory for erase and write operations.
+%% @end
+-spec unlock(uart:uart()) -> {ok,binary()} | {error,term()}.
+
 unlock(U) ->
     command(U, [$U,?SP,?i2l(23130)]).
 
-%%
-%%
-%%
+%% @doc
+%%    Write data to RAM address Addr
+%% @end
+-spec write_memory(U::uart:uart(), Addr::integer(), Data::binary()) ->
+			  ok | {error,term()}.
+
 write_memory(U, Addr, Data) 
   when ?is_addr(Addr), Addr band 3 =:= 0,
        byte_size(Data) band 3 =:= 0,
@@ -221,10 +308,13 @@ write_data(U, [], Lines0, Timeout, Resend) ->
 	    {error, timeout}
     end.
 
-%%
-%% address Addr must be a multiple of 4
-%% Byte count N must also be a multiple of 4
-%%
+%% @doc
+%%   Read data from RAM or flash memeory.
+%%   Address Addr must be a multiple of 4 and 
+%%   byte count N must be a multiple of 4 and not more than 900 bytes
+%% @end
+-spec read_memory(U::uart:uart(), Addr::integer(), N::non_neg_integer()) ->
+			 {ok,binary()} | {error,term()}.
 read_memory(U, Addr, N) 
   when ?is_addr(Addr), Addr band 3 =:= 0, N band 3 =:= 0,
        N =< ?UU_MAX_LINES*?UU_MAX_LINE_LENGTH ->
@@ -251,9 +341,10 @@ read_memory(U, Addr, N)
 	    Error
     end.
 
+-spec command(U::uart:uart(), iolist()) -> ok | {error,term()}.
 
 command(U, Cmd) ->
-    Cmd1 = <<(list_to_binary(Cmd))/binary,$\r,$\n>>,
+    Cmd1 = erlang:iolist_to_binary([Cmd,$\r,$\n]),
     ?dbg("Command: [~s]", [Cmd]),
     uart:send(U, Cmd1),
     case response(U, Cmd1) of
