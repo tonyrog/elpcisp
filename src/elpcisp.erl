@@ -11,6 +11,7 @@
 -export([sync/1, sync/2, sync/3]).
 -export([flush/1]).
 -export([enter/1]).
+-export([reset/1]).
 -export([unlock/1]).
 -export([echo/2]).
 -export([go/2,go/3]).
@@ -142,6 +143,17 @@ enter(U) ->
     uart:clear_modem(U, [dtr]),
     timer:sleep(500),
     uart:clear_modem(U, [rts]),
+    ok.
+
+%% @doc
+%%    Reset
+%% @end
+-spec reset(uart:uart()) -> ok.
+		   
+reset(U) ->
+    uart:set_modem(U, [dtr,rts]),
+    timer:sleep(100),
+    uart:clear_modem(U, [dtr,rts]),
     ok.
 
 %% @doc
