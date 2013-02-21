@@ -155,7 +155,10 @@ enter(U) ->
 reset(U) ->
     uart:set_modem(U, [dtr,rts]),
     timer:sleep(100),
+    %% clear buffers?
+    timer:sleep(100),
     uart:clear_modem(U, [dtr,rts]),
+    timer:sleep(100),
     ok.
 
 %% @doc
@@ -673,7 +676,7 @@ flash_block_list(_U, _DevType, []) ->
     ok.
 
 flash_block(U, DevType, Addr, Data) ->
-    flash_block(U, DevType, Addr, Data, fun(_) -> ok end).
+    flash_block(U, DevType, Addr, Data, fun(_) -> io:format(".") end).
 
 flash_block(_U, _DevType, _Addr, <<>>, _Fun) ->
     ok;
