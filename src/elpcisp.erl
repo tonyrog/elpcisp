@@ -28,7 +28,7 @@
 -export([flash/2]).
 -export([patch_segment/3]).
 -export([block_list/2]).
--export([flash_block/4]).
+-export([flash_block/5]).
 
 
 %% -compile(export_all).
@@ -670,9 +670,12 @@ flash_block_list(U, DevType, [{Start,StartBlock,EndBlock,Data}|Bs]) ->
 flash_block_list(_U, _DevType, []) ->
     ok.
 
-flash_block(_U, _DevType, _Addr, <<>>) ->
-    ok;
 flash_block(U, DevType, Addr, Data) ->
+    flash_block(U, DevType, Addr, Data, fun(_) -> ok end).
+
+flash_block(_U, _DevType, _Addr, <<>>, _Fun) ->
+    ok;
+flash_block(U, DevType, Addr, Data, Fun) ->
     {Segment,Data1} = get_segment(Data, 512),
     Segment1 = patch_segment(Addr, DevType, Segment),
     {Block,BlockSize} = find_block(Addr, DevType#device_type.sectorTable),
@@ -681,7 +684,8 @@ flash_block(U, DevType, Addr, Data) ->
     ok = write_memory(U, Base, Segment1),
     {ok,_} = prepare_sector(U, Block, Block),
     {ok,_} = copy(U, Addr, Base, 512),
-    flash_block(U, DevType, Addr+512, Data1).
+    Fun(Addr+512),
+    flash_block(U, DevType, Addr+512, Data1, Fun).
 
 patch_segment(0, DevType, Segment) -> %% lpc2xxx
     if DevType#device_type.variant  =:= lpc2xxx ->
