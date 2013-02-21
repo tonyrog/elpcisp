@@ -28,7 +28,7 @@
 -export([flash/2]).
 -export([patch_segment/3]).
 -export([block_list/2]).
--export([flash_block/5]).
+-export([flash_block/4, flash_block/5]).
 
 
 %% -compile(export_all).
@@ -41,6 +41,8 @@
 
 %% -define(dbg(F,A), io:format((F)++"\n",(A))).
 -define(dbg(F,A), ok).
+
+-define(SEGMENT_SIZE, 512).
 
 -include("elpcisp.hrl").
 
@@ -114,8 +116,8 @@ wait_sync__(U,I,Tmo,Tmo0,Acc) ->
 	    wait_sync__(U, I, Tmo,Tmo0,Acc);
 	{uart,U,Data} ->
 	    wait_sync__(U,I,0,Tmo0,<<Acc/binary,Data/binary>>);
-	What ->
-	    ?dbg("What=~p", [What]),
+	_What ->
+	    ?dbg("What=~p", [_What]),
 	    wait_sync__(U, I,Tmo,Tmo0,Acc)
     after Tmo ->
 	    if Tmo =:= 0 ->
@@ -676,16 +678,16 @@ flash_block(U, DevType, Addr, Data) ->
 flash_block(_U, _DevType, _Addr, <<>>, _Fun) ->
     ok;
 flash_block(U, DevType, Addr, Data, Fun) ->
-    {Segment,Data1} = get_segment(Data, 512),
+    {Segment,Data1} = get_segment(Data, ?SEGMENT_SIZE),
     Segment1 = patch_segment(Addr, DevType, Segment),
-    {Block,BlockSize} = find_block(Addr, DevType#device_type.sectorTable),
-    ?dbg("Write: ~8.16.0B [~w:~w]", [Addr,Block,BlockSize]),
+    {Block,_BlockSize} = find_block(Addr, DevType#device_type.sectorTable),
+    ?dbg("Write: ~8.16.0B [~w:~w]", [Addr,Block,_BlockSize]),
     Base = rambase(DevType),
     ok = write_memory(U, Base, Segment1),
     {ok,_} = prepare_sector(U, Block, Block),
-    {ok,_} = copy(U, Addr, Base, 512),
-    Fun(Addr+512),
-    flash_block(U, DevType, Addr+512, Data1, Fun).
+    {ok,_} = copy(U, Addr, Base, ?SEGMENT_SIZE),
+    Fun(Addr+?SEGMENT_SIZE),
+    flash_block(U, DevType, Addr+?SEGMENT_SIZE, Data1, Fun).
 
 patch_segment(0, DevType, Segment) -> %% lpc2xxx
     if DevType#device_type.variant  =:= lpc2xxx ->
@@ -712,7 +714,7 @@ get_segment(Data, Len) ->
 	<<Segment:Len/binary, Data1/binary>> ->
 	    {Segment,Data1};
 	Segment ->
-	    Pad = (512 - byte_size(Segment)),
+	    Pad = (?SEGMENT_SIZE - byte_size(Segment)),
 	    {<<Segment/binary, 0:Pad/unit:8>>, <<>>}
     end.
 %%
