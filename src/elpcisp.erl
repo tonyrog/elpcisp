@@ -8,7 +8,7 @@
 -module(elpcisp).
 
 -export([open/1, open/2]).
--export([sync/1, sync/2, sync/3]).
+-export([sync/1, sync/2, sync/3, sync_osc/4]).
 -export([flush/1]).
 -export([enter/1]).
 -export([reset/1]).
@@ -39,8 +39,8 @@
 -define(is_addr(A), is_integer(A),((A) >= 0),((A) =< 16#ffffffff)).
 -define(i2l(X), integer_to_list((X))).
 
--define(dbg(F,A), io:format((F)++"\n",(A))).
-%% -define(dbg(F,A), ok).
+%% -define(dbg(F,A), io:format((F)++"\n",(A))).
+-define(dbg(F,A), ok).
 
 -include("elpcisp.hrl").
 
@@ -65,20 +65,20 @@ open(Device,Baud) ->
 %% @end
 -spec sync(U::uart:uart()) -> ok | {error,term()}.
 sync(U) -> 
-    sync_(U, -1, 500, "12000").
+    sync_osc(U, -1, 500, "12000").
 
 -spec sync(U::uart:uart(),Retries::integer()) ->
 		  ok | {error,term()}.
 sync(U, N) when is_integer(N), N>0 -> 
-    sync_(U, N, 500, "12000").
+    sync_osc(U, N, 500, "12000").
 
 -spec sync(U::uart:uart(),Retries::integer(),Tmo::timeout()) ->
 		  ok | {error,term()}.
 
 sync(U, N, Tmo) when is_integer(N), N>0, is_integer(Tmo), Tmo>0 ->
-    sync_(U, N, Tmo, "12000").
+    sync_osc(U, N, Tmo, "12000").
 
-sync_(U, N, Tmo, Osc) ->
+sync_osc(U, N, Tmo, Osc) ->
     uart:setopts(U, [{active,true},{packet,0}]),
     flush(U),
     case sync__(U,N,Tmo) of
