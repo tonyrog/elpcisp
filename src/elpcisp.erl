@@ -39,8 +39,8 @@
 -define(is_addr(A), is_integer(A),((A) >= 0),((A) =< 16#ffffffff)).
 -define(i2l(X), integer_to_list((X))).
 
--define(dbg(F,A), io:format((F)++"\n",(A))).
-%% -define(dbg(F,A), ok).
+%% -define(dbg(F,A), io:format((F)++"\n",(A))).
+-define(dbg(F,A), ok).
 
 -include("elpcisp.hrl").
 
