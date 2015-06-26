@@ -1,0 +1,11 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%% @author Tony Rogvall <tony@rogvall.se>
+%%% @copyright (C) 2015, Tony Rogvall
+%%% @doc
+%%%    Flash update a seazone/lpc device
+%%% @end
+
+main([Device,File]) ->
+    elpcisp:flash(Device, File).
+

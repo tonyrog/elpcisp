@@ -106,7 +106,7 @@ sync__(_U, 0, _Tmo) ->
     {error,no_sync};
 sync__(U, I, Tmo) ->
     enter(U),
-    io:format("."),
+    io:format("#"),
     uart:send(U, "?"),
     wait_sync__(U,I,Tmo,Tmo,<<>>).
 
