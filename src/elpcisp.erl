@@ -7,12 +7,14 @@
 
 -module(elpcisp).
 
--export([open/1, open/2]).
+-export([open/1, open/2, close/1]).
 -export([sync/1, sync/2, sync/3, sync_osc/4]).
+-export([info/1, info_version/1, info_device/1]).
 -export([flush/1]).
 -export([enter/1]).
 -export([reset/1]).
 -export([unlock/1]).
+-export([set_baud_rate/2, set_baud_rate/3]).
 -export([echo/2]).
 -export([go/2,go/3]).
 -export([copy/4]).
@@ -36,6 +38,7 @@
 -import(lists, [reverse/1]).
 
 -define(SP, $\s).
+-define(NL, <<$\r,$\n>>).
 -define(is_addr(A), is_integer(A),((A) >= 0),((A) =< 16#ffffffff)).
 -define(i2l(X), integer_to_list((X))).
 
@@ -63,6 +66,13 @@ open(Device,Baud) ->
     uart:open(Device, [{baud,Baud},{active,false},{packet,0},{mode,binary}]).
 
 %% @doc
+%%   Close the elpcisp device
+%% @end
+
+close(U) ->
+    uart:close(U).
+
+%% @doc
 %%   Sync will (try to) set the LPC circuit in programming mode.
 %% @end
 -spec sync(U::uart:uart()) -> ok | {error,term()}.
@@ -86,8 +96,10 @@ sync_osc(U, N, Tmo, Osc) ->
     case sync__(U,N,Tmo) of
 	ok ->
 	    uart:setopts(U, [{packet,line}]),
-	    {ok,_} = command(U, "Synchronized"),
-	    command(U, Osc);
+	    case command(U, "Synchronized") of
+		{ok,_}  -> command(U, Osc);
+		Error -> Error
+	    end;
 	Error ->
 	    Error
     end.
@@ -101,7 +113,7 @@ flush(U) ->
     end.
 
 
-sync__(_U, 0, _Tmo) -> 
+sync__(_U, 0, _Tmo) ->
     io:format("\n"),
     {error,no_sync};
 sync__(U, I, Tmo) ->
@@ -115,13 +127,15 @@ wait_sync__(U,I,Tmo,Tmo0,Acc) ->
 	{uart,U,<<"?">>} ->
 	    wait_sync__(U, I, Tmo,Tmo0,Acc);
 	{uart,U,Data} ->
+	    ?dbg("Got data = ~p\n", [Data]),
 	    wait_sync__(U,I,0,Tmo0,<<Acc/binary,Data/binary>>);
 	_What ->
 	    ?dbg("What=~p", [_What]),
 	    wait_sync__(U, I,Tmo,Tmo0,Acc)
     after Tmo ->
 	    if Tmo =:= 0 ->
-		    if Acc =:= <<"Synchronized\r\n">> ->
+		    if Acc =:= <<"Synchronized\n\n">>;
+		       Acc =:= <<"Synchronized\r\n">> ->
 			    io:format("\n"),
 			    ok;
 		       true ->
@@ -170,6 +184,14 @@ echo(U, true) ->
     command(U, [$A,?SP,?i2l(1)]);
 echo(U, false) ->
     command(U, [$A,?SP,?i2l(0)]).
+
+%% @doc
+%%    Set baud rate
+%% @end
+set_baud_rate(U, Baud) ->
+    set_baud_rate(U, Baud, 1).
+set_baud_rate(U, Baud, Stop) ->
+    command(U, [$B,?SP,?i2l(Baud),?SP,?i2l(Stop)]).
 
 %% @doc
 %%    Prepare the all sectors from A to and including B to be 
@@ -303,8 +325,9 @@ write_data(U, Lines, Timeout, Resend) ->
     write_data(U, Lines, Lines, Timeout, Resend).
 
 write_data(U, [Line|Lines], Lines0, Timeout, Resend) ->
-    Line1 = <<Line/binary,$\r,$\n>>,
-    uart:send(U, Line1),
+    Line1 = <<Line/binary>>,
+    uart:send(U, [Line1,?NL]),
+    ?dbg("write_data [~p]\n", [[Line1,?NL]]),
     case wait_echo(U, Line1, Timeout) of
 	ok ->
 	    write_data(U, Lines, Lines0, Timeout, Resend);
@@ -312,18 +335,36 @@ write_data(U, [Line|Lines], Lines0, Timeout, Resend) ->
 	    Error
     end;
 write_data(U, [], Lines0, Timeout, Resend) ->
-    receive 
-	{uart, U, <<"OK\r\n">>} ->
-	    ok;
-	{uart, U, <<"RESEND\r\n">>} ->
+    case write_data_response(U, Timeout) of
+	ok -> ok;
+	resend ->
 	    if Resend =:= 0 ->
 		    {error, transmission_failed};
 	       true ->
 		    write_data(U, Lines0, Lines0, Timeout, Resend-1)
+	    end;
+	Err = {error,_Error} ->
+	    ?dbg("write_data: error [~p]\n", [_Error]),
+	    Err
+    end.
+
+write_data_response(U, Timeout) ->
+    receive
+	{uart, U, Response} ->
+	    ?dbg("write_data_response: [~p]\n", [Response]),
+	    case trim_nl(Response) of
+		<<>> -> write_data_response(U, Timeout);
+		<<"OK">> -> ok;
+		<<"RESEND">> -> resend;
+		Other ->
+		    ?dbg("write_data: error [~p]\n", [Other]),
+		    {error,Other}
 	    end
     after Timeout ->
 	    {error, timeout}
     end.
+
+    
 
 %% @doc
 %%   Read data from RAM or flash memeory.
@@ -339,16 +380,16 @@ read_memory(U, Addr, N)
 	{ok, Lines} ->
 	    case elpcisp_uu:decode_csum(Lines) of
 		{ok,Data} ->
-		    Ack = <<"OK\r\n">>,
-		    uart:send(U, Ack),
+		    Ack = <<"OK">>,
+		    uart:send(U, [Ack,?NL]),
 		    case wait_echo(U, Ack, 1000) of
 			ok -> {ok,Data};
 			Error -> Error
 		    end;
 		Error ->
 		    %% Do not resend here, let application do that
-		    Ack = <<"OK\r\n">>,
-		    uart:send(U, Ack),
+		    Ack = <<"OK">>,
+		    uart:send(U, [Ack,?NL]),
 		    case wait_echo(U, Ack, 1000) of
 			ok -> Error;
 			Error2 -> Error2
@@ -360,21 +401,30 @@ read_memory(U, Addr, N)
 
 -spec command(U::uart:uart(), iolist()) -> ok | {error,term()}.
 
-command(U, Cmd) ->
-    Cmd1 = erlang:iolist_to_binary([Cmd,$\r,$\n]),
+command(U, Cmd0) ->
+    Cmd = erlang:iolist_to_binary(Cmd0),
     ?dbg("Command: [~s]", [Cmd]),
-    uart:send(U, Cmd1),
-    case response(U, Cmd1) of
+    uart:send(U, [Cmd,?NL]),
+    case response(U, Cmd) of
 	{ok,Response} ->
-	    decode_result(Response);
+	    R = decode_result(Response),
+	    ?dbg("Response: [~p] = ~p", [Response,R]),
+	    R;
 	Error ->
 	    Error
     end.
 
 wait_echo(U, Cmd, Timeout) ->
-    receive 
-	{uart,U,Cmd} ->
-	    ok
+    receive
+	{uart,U,Echo} ->
+	    ?dbg("echo = [~p]\n", [Echo]),
+	    case trim_nl(Echo) of
+		Cmd -> ok;
+		<<>> -> wait_echo(U, Cmd, Timeout);
+		_ ->
+		    ?dbg("wait_echo got [~p]\n", [Echo]),
+		    {error, echo}
+	    end
     after Timeout ->
 	    {error,timeout}
     end.
@@ -384,10 +434,14 @@ response(U, Cmd) ->
 
 response(U,Cmd,Timeout) ->
     receive
-	{uart,U,Cmd} ->  %% ignore command echo
-	    response1(U,Timeout,[]);
 	{uart,U,Resp} ->
-	    response1(U,Timeout,[trim_nl(Resp)]);
+	    case trim_nl(Resp) of
+		<<>> -> response(U,Cmd,Timeout);  %% single new line?
+		Cmd -> response1(U,Timeout,[]);  %% ignore echo
+		NResp ->
+		    ?dbg("got nresp = ~p\n", [NResp]),
+		    response1(U,Timeout,[NResp])
+	    end;
 	{uart_closed, U} ->
 	    {error, closed};
 	{uart_error, U, Error} ->
@@ -399,7 +453,10 @@ response(U,Cmd,Timeout) ->
 response1(U,Timeout,Acc) ->
     receive
 	{uart,U,Result} ->
-	    response1(U, 50, [trim_nl(Result)|Acc]);
+	    case trim_nl(Result) of
+		<<>> -> response1(U,Timeout,Acc);
+		Trim ->  response1(U, 50, [Trim|Acc])
+	    end;
 	{uart_closed, U} ->
 	    {error, closed};
 	{uart_error, U, Error} ->
@@ -418,6 +475,7 @@ trim_nl(Bin) ->
     Sz2 = Sz-2,
     case Bin of
 	<<Bin1:Sz2/binary,$\r,$\n>> -> Bin1;
+	<<Bin1:Sz2/binary,$\n,$\n>> -> Bin1;
 	<<Bin1:Sz1/binary,$\n>> -> Bin1;
 	_ -> Bin
     end.
@@ -615,6 +673,44 @@ ramstart(DevType) ->
     end.
 -endif.
 
+info_version(U) ->
+    case read_version(U) of
+	{ok, [Minor,Major]} ->
+	    [{version, {binary_to_integer(Major), binary_to_integer(Minor)}}];
+	{ok, Version} ->
+	    [{version, Version}];
+	Error ->
+	    [{version, {error, Error}}]
+    end.
+
+info_device(U) ->
+    case read_device_type(U) of
+	{ok, DevType} ->
+	    [{id,DevType#device_type.id},
+	     {product, DevType#device_type.product},
+	     {flashSize,DevType#device_type.flashSize},
+	     {ramSize,DevType#device_type.ramSize},
+	     {flashSectors, DevType#device_type.flashSectors},
+	     {maxCopySize, DevType#device_type.maxCopySize},
+	     {variant,DevType#device_type.variant}];
+	Error ->
+	    [{id,{error,Error}}]
+    end.
+
+info(U) ->
+    info_version(U) ++ info_device(U).
+
+flash_dump_info(U) ->
+    io:format("info: ~p\n", [info(U)]).
+
+flash_set_baudrate(U, Baud) ->
+    case set_baud_rate(U, Baud, 1) of
+	{ok,_} ->
+	    uart:setopts(U, [{ibaud,Baud},{obaud,Baud}]);
+	Error ->
+	    io:format("unable to set baud_rate : ~p\n", [Error]),
+	    Error
+    end.
 
 %% @doc
 %%    Flash a firmware ihex-image from file onto a device
@@ -626,6 +722,9 @@ flash(Device, File) when is_list(Device), is_list(File) ->
 	{ok,U} ->
 	    case sync(U, 30) of
 		{ok,_} ->
+		    %% fixme: turn off echo, find better baud rate
+		    flash_dump_info(U),
+		    flash_set_baudrate(U, 38400),
 		    case unlock(U) of
 			{ok,_} ->
 			    try flash(U, File) of
@@ -637,11 +736,16 @@ flash(Device, File) when is_list(Device), is_list(File) ->
 				uart:close(U)
 			    end;
 			Error -> 
+			    io:format("flash error (unlock): ~p\n", [Error]),
 			    Error
 		    end;
-		Error -> Error
+		Error ->
+		    io:format("flash error (sync): ~p\n", [Error]),
+		    Error
 	    end;
-	Error -> Error
+	Error ->
+	    io:format("flash error (open): ~p\n", [Error]),
+	    Error
     end;
 flash(U, File) when is_port(U), is_list(File) ->
     %% U must be synced and unlocked
@@ -651,6 +755,7 @@ flash(U, File) when is_port(U), is_list(File) ->
 		{ok,AddrLines} ->
 		    flash_data(U, AddrLines);
 		Error ->
+		    io:format("unable load file ~s: ~p\n", [File, Error]),
 		    Error
 	    end;
 	Ext ->

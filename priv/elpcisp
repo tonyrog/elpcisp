@@ -6,6 +6,20 @@
 %%%    Flash update a seazone/lpc device
 %%% @end
 
+%% Fixme: add options to set baudrate, oscillator frequency, 
+%%  flash, info, check, write to ram (bootloader update).
+main([Device]) ->
+    case elpcisp:open(Device) of
+	{ok,U} ->
+	    case elpcisp:sync(U, 30) of
+		{ok,_} ->
+		    io:format("info: ~p\n", [elpcisp:info(U)]),
+		    elpcisp:close(U);
+		Error ->
+		    io:format("elpcisp error (sync): ~p\n", [Error])
+	    end;
+	Error ->
+	    io:format("elpcisp open (sync): ~p\n", [Error])
+    end;
 main([Device,File]) ->
     elpcisp:flash(Device, File).
-

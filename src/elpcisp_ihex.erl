@@ -27,7 +27,7 @@ merge(Lines) ->
 	    []
     end.
 
-merge(Addr,Data,[{Addr1,Data1}|Rest],Acc) when Addr1 == Addr+size(Data) ->
+merge(Addr,Data,[{Addr1,Data1}|Rest],Acc) when Addr1 =:= Addr+size(Data) ->
     merge(Addr,<<Data/binary,Data1/binary>>,Rest,Acc);
 merge(Addr,Data,[{Addr1,Data1}|Rest],Acc) ->
     merge(Addr1,Data1,Rest,[{Addr,Data}|Acc]);
@@ -63,7 +63,7 @@ decode_rec(0,Addr,Rec,Start,ExtBase,SegBase,Bin,Acc) ->
     decode(Bin, Start, ExtBase, SegBase, [{ExtBase+SegBase+Addr,Data}|Acc]);
 decode_rec(1,Addr,_Rec,Start,_ExtBase,_SegBase,_Bin,Acc) ->
     %% An end record
-    if Start == 0 ->
+    if Start =:= 0 ->
 	    {Addr,reverse(Acc)};
        true ->
 	    {Start,reverse(Acc)}
