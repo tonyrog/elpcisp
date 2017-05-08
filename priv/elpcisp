@@ -10,23 +10,39 @@ main(Opts) ->
     put(control, false),
     put(control_inv, false),
     put(control_swap, false),
-    {Device,File} = options(Opts, ""),
-    case elpcisp:flash(Device, File) of
-	ok -> ok;
-	{error,enoent} ->
-	    case filelib:is_file(File) of
-		true ->
-		    io:format("elpcisp: can not open device ~s\n", [Device]);
-		false ->
-		    io:format("elpcisp: can not open hex file ~s\n", [File])
-	    end,
+    case options(Opts, "") of
+	{"",_} ->
 	    usage();
-	{error,Reason} ->
-	    io:format("elpcisp: error ~p\n", [Reason]),
-	    usage()
+	{Device,""} ->
+	    case elpcisp:open(Device) of
+		{ok,U} ->
+		    case elpcisp:sync(U, 30) of
+			{ok,_} ->
+			    io:format("info: ~p\n", [elpcisp:info(U)]),
+			    elpcisp:close(U);
+			Error ->
+			    io:format("elpcisp error (sync): ~p\n", [Error])
+		    end;
+		Error ->
+		    io:format("elpcisp open (sync): ~p\n", [Error])
+	    end;
+	{Device,File} ->
+	    case elpcisp:flash(Device, File) of
+		ok -> ok;
+		{error,enoent} ->
+		    case filelib:is_file(File) of
+			true ->
+			    io:format("elpcisp: can not open device ~s\n", [Device]);
+			false ->
+			    io:format("elpcisp: can not open hex file ~s\n", [File])
+		    end,
+		    usage();
+		{error,Reason} ->
+		    io:format("elpcisp: error ~p\n", [Reason]),
+		    usage()
+	    end
     end.
 	    
-    
 options(["-D", Device | Opts], _Device) ->
     options(Opts, Device);
 options(["-device", Device | Opts], _Device) ->
@@ -43,8 +59,8 @@ options(["-controlinv" | Opts], Device) ->
 options([[$-|Opt] | _Opts], _Device) ->
     io:format("unknown option ~s\n", [Opt]),
     usage();
-options([], _Device) ->
-    usage();
+options([], Device) ->
+    {Device, ""};
 options([File], Device) ->
     {Device, File}.
 
@@ -57,12 +73,3 @@ usage() ->
     io:format("  -device device\n"),
     io:format("  -D device\n"),
     erlang:halt(1).
-
-
-    
-   
-
-
-    
-    
-
