@@ -138,14 +138,19 @@ wait_sync__(U,I,Tmo,Tmo0,Acc) ->
 -spec enter(uart:uart()) -> ok.
 		   
 enter(U) ->
-    uart:set_modem(U, [dtr,rts]),
-    timer:sleep(100),
-    %% clear buffers?
-    timer:sleep(100),
-    uart:clear_modem(U, [dtr]),
-    timer:sleep(500),
-    uart:clear_modem(U, [rts]),
-    ok.
+    case get(control) of
+	true ->
+	    uart:set_modem(U, [dtr,rts]),
+	    timer:sleep(100),
+	    %% clear buffers?
+	    timer:sleep(100),
+	    uart:clear_modem(U, [dtr]),
+	    timer:sleep(500),
+	    uart:clear_modem(U, [rts]),
+	    ok;
+	_ ->
+	    ok
+    end.
 
 %% @doc
 %%    Reset

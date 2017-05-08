@@ -6,6 +6,63 @@
 %%%    Flash update a seazone/lpc device
 %%% @end
 
-main([Device,File]) ->
-    elpcisp:flash(Device, File).
+main(Opts) ->
+    put(control, false),
+    put(control_inv, false),
+    put(control_swap, false),
+    {Device,File} = options(Opts, ""),
+    case elpcisp:flash(Device, File) of
+	ok -> ok;
+	{error,enoent} ->
+	    case filelib:is_file(File) of
+		true ->
+		    io:format("elpcisp: can not open device ~s\n", [Device]);
+		false ->
+		    io:format("elpcisp: can not open hex file ~s\n", [File])
+	    end,
+	    usage();
+	{error,Reason} ->
+	    io:format("elpcisp: error ~p\n", [Reason]),
+	    usage()
+    end.
+	    
+    
+options(["-D", Device | Opts], _Device) ->
+    options(Opts, Device);
+options(["-device", Device | Opts], _Device) ->
+    options(Opts, Device);
+options(["-control" | Opts], Device) ->
+    put(control, true),  %% FIXME
+    options(Opts, Device);
+options(["-controlswap" | Opts], Device) ->
+    put(control_swap, true),  %% FIXME
+    options(Opts, Device);
+options(["-controlinv" | Opts], Device) ->
+    put(control_inv, true),  %% FIXME
+    options(Opts, Device);
+options([[$-|Opt] | _Opts], _Device) ->
+    io:format("unknown option ~s\n", [Opt]),
+    usage();
+options([], _Device) ->
+    usage();
+options([File], Device) ->
+    {Device, File}.
+
+usage() ->
+    io:format("elpcisp: usage lpcisp <options> hex-file\n"),
+    io:format("OPTIONS\n"),
+    io:format("  -control\n"),
+    io:format("  -controlinv\n"),
+    io:format("  -controlswap\n"),
+    io:format("  -device device\n"),
+    io:format("  -D device\n"),
+    erlang:halt(1).
+
+
+    
+   
+
+
+    
+    
 
