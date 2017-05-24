@@ -14,7 +14,11 @@ main(Opts) ->
 	{"",_} ->
 	    usage();
 	{Device,""} ->
-	    case elpcisp:open(Device) of
+	    Baud = case get(baud) of
+		       B when is_integer(B), B>0 -> B;
+		       _ -> 38400
+		   end,
+	    case elpcisp:open(Device,Baud) of
 		{ok,U} ->
 		    case elpcisp:sync(U, 30) of
 			{ok,_} ->
@@ -45,16 +49,31 @@ main(Opts) ->
 	    
 options(["-D", Device | Opts], _Device) ->
     options(Opts, Device);
-options(["-device", Device | Opts], _Device) ->
+options(["--device", Device | Opts], _Device) ->
     options(Opts, Device);
-options(["-control" | Opts], Device) ->
+options(["--control" | Opts], Device) ->
     put(control, true),  %% FIXME
     options(Opts, Device);
-options(["-controlswap" | Opts], Device) ->
+options(["-c" | Opts], Device) ->
+    put(control, true),  %% FIXME
+    options(Opts, Device);
+options(["--controlswap" | Opts], Device) ->
     put(control_swap, true),  %% FIXME
     options(Opts, Device);
-options(["-controlinv" | Opts], Device) ->
+options(["--controlinv" | Opts], Device) ->
     put(control_inv, true),  %% FIXME
+    options(Opts, Device);
+options(["--debug" | Opts], Device) ->
+    put(debug, true),  %% FIXME
+    options(Opts, Device);
+options(["-d" | Opts], Device) ->
+    put(debug, true),  %% FIXME
+    options(Opts, Device);
+options(["--baudrate", Rate | Opts], Device) ->
+    put(baud, list_to_integer(Rate)),
+    options(Opts, Device);
+options(["-b", Rate | Opts], Device) ->
+    put(baud, list_to_integer(Rate)),
     options(Opts, Device);
 options([[$-|Opt] | _Opts], _Device) ->
     io:format("unknown option ~s\n", [Opt]),
@@ -62,14 +81,21 @@ options([[$-|Opt] | _Opts], _Device) ->
 options([], Device) ->
     {Device, ""};
 options([File], Device) ->
-    {Device, File}.
+    {Device, File};
+options(_, _Device) ->
+    usage().
 
 usage() ->
-    io:format("elpcisp: usage lpcisp <options> hex-file\n"),
+    io:format("elpcisp: usage elpcisp <options> hex-file\n"),
     io:format("OPTIONS\n"),
-    io:format("  -control\n"),
-    io:format("  -controlinv\n"),
-    io:format("  -controlswap\n"),
-    io:format("  -device device\n"),
-    io:format("  -D device\n"),
+    io:format("  --control           DTR+RTS    reset + isp\n"),
+    io:format("  --controlinv        /DTR+/RTS  reset + isp\n"),
+    io:format("  --controlswap       RTS+DTR    reset + isp\n"),
+    io:format("  --device <device>   set decive name\n"),
+    io:format("  --debug             turn on debugging\n"),
+    io:format("  --baudrate <rate>   set baud rate\n"),
+    io:format("  -c                  DTR+RTS reset + isp\n"),
+    io:format("  -d                  turn on debugging\n"),
+    io:format("  -D <device>         set device name\n"),
+    io:format("  -b <rate>           set baud rate\n"),
     erlang:halt(1).
