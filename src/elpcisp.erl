@@ -42,8 +42,11 @@
 -define(is_addr(A), is_integer(A),((A) >= 0),((A) =< 16#ffffffff)).
 -define(i2l(X), integer_to_list((X))).
 
-%% -define(dbg(F,A), io:format((F)++"\n",(A))).
--define(dbg(F,A), ok).
+-define(dbg(F,A),
+	case get(debug) of
+	    true -> io:format((F)++"\n",(A));
+	    _ -> ok
+	end).
 
 -define(SEGMENT_SIZE, 512).
 
@@ -156,17 +159,46 @@ wait_sync__(U,I,Tmo,Tmo0,Acc) ->
 enter(U) ->
     case get(control) of
 	true ->
-	    uart:set_modem(U, [dtr,rts]),
+	    ISP = get_isp(),
+	    RESET = get_reset(),
+	    ClearModem = get_clear_modem(),
+	    SetModem = get_set_modem(),
+	    uart:SetModem(U, [RESET,ISP]),
 	    timer:sleep(100),
 	    %% clear buffers?
 	    timer:sleep(100),
-	    uart:clear_modem(U, [dtr]),
+	    uart:ClearModem(U, [RESET]),
 	    timer:sleep(500),
-	    uart:clear_modem(U, [rts]),
+	    uart:ClearModem(U, [ISP]),
 	    ok;
 	_ ->
 	    ok
     end.
+
+get_clear_modem() ->
+    case get(control_inv) of
+	true -> set_modem;
+	_ -> clear_modem
+    end.
+
+get_set_modem() ->
+    case get(control_inv) of
+	true -> clear_modem;
+	_ -> set_modem
+    end.
+
+get_reset() ->
+    case get(control_swap) of
+	true -> rts;
+	_ -> dtr
+    end.
+
+get_isp() ->
+    case get(control_swap) of
+	true -> dtr;
+	_ -> rts
+    end.
+
 
 %% @doc
 %%    Reset
@@ -174,11 +206,15 @@ enter(U) ->
 -spec reset(uart:uart()) -> ok.
 		   
 reset(U) ->
-    uart:set_modem(U, [dtr,rts]),
+    %% ISP = get_isp(),
+    RESET = get_reset(),
+    ClearModem = get_clear_modem(),
+    SetModem = get_set_modem(),
+    uart:SetModem(U, [RESET]),   %% +ISP?
     timer:sleep(100),
     %% clear buffers?
     timer:sleep(100),
-    uart:clear_modem(U, [dtr,rts]),
+    uart:ClearModem(U, [RESET]), %% +ISP?
     timer:sleep(100),
     ok.
 
@@ -735,7 +771,11 @@ flash(Device, File) when is_list(Device), is_list(File) ->
 		    case unlock(U) of
 			{ok,_} ->
 			    try flash(U, File) of
-				ok -> go(U, 0);
+				ok -> 
+				    case go(U, 0) of
+					{ok,_} -> ok;
+					Error -> Error
+				    end;
 				Result -> Result
 			    catch
 				error:Error -> {error,Error}
