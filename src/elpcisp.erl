@@ -90,8 +90,10 @@ sync(U, N) when is_integer(N), N>0 ->
 sync(U, N, Tmo) when is_integer(N), N>0, is_integer(Tmo), Tmo>0 ->
     sync_osc(U, N, Tmo, "12000").
 
+%% FIXME!!! Check if already in boot mode!
 sync_osc(U, N, Tmo, Osc) ->
     uart:setopts(U, [{active,true},{packet,0}]),
+    uart:flush(U, both),
     flush(U),
     case sync__(U,N,Tmo) of
 	ok ->
@@ -112,7 +114,7 @@ flush(U) ->
 	    ok
     end.
 
-
+%% FIXME!!! Check if already in boot mode!
 sync__(_U, 0, _Tmo) ->
     io:format("\n"),
     {error,no_sync};
