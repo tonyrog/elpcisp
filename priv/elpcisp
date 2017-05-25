@@ -7,6 +7,7 @@
 %%% @end
 
 main(Opts) ->
+    put(debug, 0),
     put(control, false),
     put(control_inv, false),
     put(control_swap, false),
@@ -64,10 +65,16 @@ options(["--controlinv" | Opts], Device) ->
     put(control_inv, true),  %% FIXME
     options(Opts, Device);
 options(["--debug" | Opts], Device) ->
-    put(debug, true),  %% FIXME
+    put(debug, 1),
+    options(Opts, Device);
+options(["--debug2" | Opts], Device) ->
+    put(debug, 2),
     options(Opts, Device);
 options(["-d" | Opts], Device) ->
-    put(debug, true),  %% FIXME
+    case get(debug) of
+	D when is_integer(D) -> put(debug,D+1);
+	_ -> put(debug, 1)
+    end,
     options(Opts, Device);
 options(["--baudrate", Rate | Opts], Device) ->
     put(baud, list_to_integer(Rate)),
@@ -93,6 +100,7 @@ usage() ->
     io:format("  --controlswap       RTS+DTR    reset + isp\n"),
     io:format("  --device <device>   set decive name\n"),
     io:format("  --debug             turn on debugging\n"),
+    io:format("  --debug2            turn on hard debugging\n"),
     io:format("  --baudrate <rate>   set baud rate\n"),
     io:format("  -c                  DTR+RTS reset + isp\n"),
     io:format("  -d                  turn on debugging\n"),

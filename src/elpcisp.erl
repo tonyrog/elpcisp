@@ -44,7 +44,14 @@
 
 -define(dbg(F,A),
 	case get(debug) of
-	    true -> io:format((F)++"\n",(A));
+	    1 -> io:format((F)++"\n",(A));
+	    2 -> io:format((F)++"\n",(A));
+	    _ -> ok
+	end).
+
+-define(dbg2(F,A),
+	case get(debug) of
+	    2 -> io:format((F)++"\n",(A));
 	    _ -> ok
 	end).
 
@@ -80,12 +87,12 @@ close(U) ->
 %% @end
 -spec sync(U::uart:uart()) -> ok | {error,term()}.
 sync(U) -> 
-    sync_osc(U, -1, 500, "12000").
+    sync_osc(U, -1, 2000, "12000").
 
 -spec sync(U::uart:uart(),Retries::integer()) ->
 		  ok | {error,term()}.
 sync(U, N) when is_integer(N), N>0 -> 
-    sync_osc(U, N, 500, "12000").
+    sync_osc(U, N, 2000, "12000").
 
 -spec sync(U::uart:uart(),Retries::integer(),Tmo::timeout()) ->
 		  ok | {error,term()}.
@@ -111,7 +118,8 @@ sync_osc(U, N, Tmo, Osc) ->
 
 flush(U) ->
     receive
-	{uart,U,_} ->
+	{uart,U,_Data} ->
+	    ?dbg2("flush <= ~s", [to_qstring(_Data)]),
 	    flush(U)
     after 0 ->
 	    ok
@@ -124,15 +132,16 @@ sync__(_U, 0, _Tmo) ->
 sync__(U, I, Tmo) ->
     enter(U),
     io:format("#"),
-    uart:send(U, "?"),
+    send(U, "?"),
     wait_sync__(U,I,Tmo,Tmo,<<>>).
 
 wait_sync__(U,I,Tmo,Tmo0,Acc) ->
     receive
-	{uart,U,<<"?">>} ->
+	{uart,U,_Data = <<"?">>} ->
+	    ?dbg2("wait_sync__ <= ~s", [to_qstring(_Data)]),
 	    wait_sync__(U, I, Tmo,Tmo0,Acc);
 	{uart,U,Data} ->
-	    ?dbg("Got data = ~p\n", [Data]),
+	    ?dbg2("wait_sync__  <= ~s", [to_qstring(Data)]),
 	    wait_sync__(U,I,0,Tmo0,<<Acc/binary,Data/binary>>);
 	_What ->
 	    ?dbg("What=~p", [_What]),
@@ -369,8 +378,7 @@ write_data(U, Lines, Timeout, Resend) ->
 
 write_data(U, [Line|Lines], Lines0, Timeout, Resend) ->
     Line1 = <<Line/binary>>,
-    uart:send(U, [Line1,?NL]),
-    ?dbg("write_data [~p]\n", [[Line1,?NL]]),
+    send(U, [Line1,?NL]),
     case wait_echo(U, Line1, Timeout) of
 	ok ->
 	    write_data(U, Lines, Lines0, Timeout, Resend);
@@ -387,20 +395,20 @@ write_data(U, [], Lines0, Timeout, Resend) ->
 		    write_data(U, Lines0, Lines0, Timeout, Resend-1)
 	    end;
 	Err = {error,_Error} ->
-	    ?dbg("write_data: error [~p]\n", [_Error]),
+	    ?dbg("write_data: error [~p]", [_Error]),
 	    Err
     end.
 
 write_data_response(U, Timeout) ->
     receive
 	{uart, U, Response} ->
-	    ?dbg("write_data_response: [~p]\n", [Response]),
+	    ?dbg2("write_data_response <= ~s", [to_qstring(Response)]),
 	    case trim_nl(Response) of
 		<<>> -> write_data_response(U, Timeout);
 		<<"OK">> -> ok;
 		<<"RESEND">> -> resend;
 		Other ->
-		    ?dbg("write_data: error [~p]\n", [Other]),
+		    ?dbg("write_data: error [~p]", [Other]),
 		    {error,Other}
 	    end
     after Timeout ->
@@ -424,7 +432,7 @@ read_memory(U, Addr, N)
 	    case elpcisp_uu:decode_csum(Lines) of
 		{ok,Data} ->
 		    Ack = <<"OK">>,
-		    uart:send(U, [Ack,?NL]),
+		    send(U, [Ack,?NL]),
 		    case wait_echo(U, Ack, 1000) of
 			ok -> {ok,Data};
 			Error -> Error
@@ -432,7 +440,7 @@ read_memory(U, Addr, N)
 		Error ->
 		    %% Do not resend here, let application do that
 		    Ack = <<"OK">>,
-		    uart:send(U, [Ack,?NL]),
+		    send(U, [Ack,?NL]),
 		    case wait_echo(U, Ack, 1000) of
 			ok -> Error;
 			Error2 -> Error2
@@ -446,8 +454,7 @@ read_memory(U, Addr, N)
 
 command(U, Cmd0) ->
     Cmd = erlang:iolist_to_binary(Cmd0),
-    ?dbg("Command: [~s]", [Cmd]),
-    uart:send(U, [Cmd,?NL]),
+    send(U, [Cmd,?NL]),
     case response(U, Cmd) of
 	{ok,Response} ->
 	    R = decode_result(Response),
@@ -457,15 +464,26 @@ command(U, Cmd0) ->
 	    Error
     end.
 
+send(U, Data) ->
+    ?dbg2("uart:send => ~s\n", [to_qstring(Data)]),
+    uart:send(U, Data).
+
+to_qstring(Data) ->
+    io_lib:write_string(to_string(Data)).
+
+to_string(Data) ->
+    binary_to_list(iolist_to_binary(Data)).
+
+
 wait_echo(U, Cmd, Timeout) ->
     receive
 	{uart,U,Echo} ->
-	    ?dbg("echo = [~p]\n", [Echo]),
+	    ?dbg2("wait echo <= ~s", [to_qstring(Echo)]),
 	    case trim_nl(Echo) of
 		Cmd -> ok;
 		<<>> -> wait_echo(U, Cmd, Timeout);
 		_ ->
-		    ?dbg("wait_echo got [~p]\n", [Echo]),
+		    ?dbg("wait_echo got [~p]", [Echo]),
 		    {error, echo}
 	    end
     after Timeout ->
@@ -478,11 +496,12 @@ response(U, Cmd) ->
 response(U,Cmd,Timeout) ->
     receive
 	{uart,U,Resp} ->
+	    ?dbg2("response <= ~s", [to_qstring(Resp)]), 
 	    case trim_nl(Resp) of
 		<<>> -> response(U,Cmd,Timeout);  %% single new line?
 		Cmd -> response1(U,Timeout,[]);  %% ignore echo
 		NResp ->
-		    ?dbg("got nresp = ~p\n", [NResp]),
+		    ?dbg("got nresp = ~p", [NResp]),
 		    response1(U,Timeout,[NResp])
 	    end;
 	{uart_closed, U} ->
@@ -496,6 +515,7 @@ response(U,Cmd,Timeout) ->
 response1(U,Timeout,Acc) ->
     receive
 	{uart,U,Result} ->
+	    ?dbg2("response1 <= ~s", [to_qstring(Result)]), 
 	    case trim_nl(Result) of
 		<<>> -> response1(U,Timeout,Acc);
 		Trim ->  response1(U, 50, [Trim|Acc])
