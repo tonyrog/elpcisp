@@ -131,17 +131,18 @@ wait_sync__(U,I,Tmo,Tmo0,Acc) ->
 	    wait_sync__(U, I, Tmo,Tmo0,Acc);
 	{uart,U,Data} ->
 	    ?dbg("Got data = ~p\n", [Data]),
-	    wait_sync__(U,I,0,Tmo0,<<Acc/binary,Data/binary>>);
+	    wait_sync__(U,I,50,Tmo0,<<Acc/binary,Data/binary>>);
 	_What ->
 	    ?dbg("What=~p", [_What]),
 	    wait_sync__(U, I,Tmo,Tmo0,Acc)
     after Tmo ->
-	    if Tmo =:= 0 ->
-		    if Acc =:= <<"Synchronized\n\n">>;
-		       Acc =:= <<"Synchronized\r\n">> ->
-			    io:format("\n"),
-			    ok;
-		       true ->
+	    if Tmo =:= 50 ->
+		    case Acc of
+			<<"Synchronized\n\n",_/binary>> ->
+			    io:format("\n");
+			<<"Synchronized\r\n",_/binary>> ->
+			    io:format("\n");
+			true ->
 			    sync__(U, I-1, Tmo0)
 		    end;
 	       true ->
