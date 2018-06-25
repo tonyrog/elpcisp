@@ -31,8 +31,7 @@
 -export([patch_segment/3]).
 -export([block_list/2]).
 -export([flash_block/4, flash_block/5]).
-
-
+-export([lpc_types/0]).
 %% -compile(export_all).
 
 -import(lists, [reverse/1]).
