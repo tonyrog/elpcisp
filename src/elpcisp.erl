@@ -152,7 +152,9 @@ wait_sync__(U,I,Tmo,Tmo0,Acc) ->
 			    io:format("\n");
 			<<"Synchronized\r\n",_/binary>> ->
 			    io:format("\n");
-			true ->
+			<<0,"Synchronized\r\n",_/binary>> -> %% buggy?
+			    io:format("\n");
+			_ ->
 			    sync__(U, I-1, Tmo0)
 		    end;
 	       true ->
