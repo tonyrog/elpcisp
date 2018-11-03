@@ -1,7 +1,7 @@
 {application, elpcisp,
  [
-  {description, ""},
-  {vsn, "1"},
+  {description, "Library for flashing firmware on to LPC chips"},
+  {vsn, git},
   {registered, []},
   {applications, [
                   kernel,
