@@ -766,7 +766,7 @@ info(U) ->
 flash_dump_info(U) ->
     io:format("info: ~p\n", [info(U)]).
 
-flash_set_baudrate(U, Baud) ->
+flash_set_baud_rate(U, Baud) ->
     case set_baud_rate(U, Baud, 1) of
 	{ok,_} ->
 	    uart:setopts(U, [{ibaud,Baud},{obaud,Baud}]);
@@ -787,7 +787,7 @@ flash(Device, File) when is_list(Device), is_list(File) ->
 		{ok,_} ->
 		    %% fixme: turn off echo, find better baud rate
 		    flash_dump_info(U),
-		    flash_set_baudrate(U, 38400),
+		    flash_set_baud_rate(U, 38400),
 		    case unlock(U) of
 			{ok,_} ->
 			    try flash(U, File) of
