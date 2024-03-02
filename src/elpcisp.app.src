@@ -2,11 +2,7 @@
  [
   {description, "Library for flashing firmware on to LPC chips"},
   {vsn, git},
-  {registered, []},
-  {applications, [
-                  kernel,
-                  stdlib,
-		  uart
-                 ]},
-  {env, []}
+  {modules, ["@@MODULES@@"]},  
+  {env, []},
+  {applications, [kernel,stdlib,uart]}
  ]}.
