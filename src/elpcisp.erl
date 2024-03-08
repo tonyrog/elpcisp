@@ -502,6 +502,7 @@ response(U,Cmd,Timeout) ->
 	    case trim_nl(Resp) of
 		<<>> -> response(U,Cmd,Timeout);  %% single new line?
 		Cmd -> response1(U,Timeout,[]);  %% ignore echo
+		[Cmd|Rs] -> response1(U,50,Rs);  %% ignore echo
 		NResp ->
 		    ?dbg("got nresp = ~p", [NResp]),
 		    response1(U,Timeout,[NResp])
@@ -539,10 +540,16 @@ trim_nl(Bin) ->
     Sz1 = Sz-1,
     Sz2 = Sz-2,
     case Bin of
-	<<Bin1:Sz2/binary,$\r,$\n>> -> Bin1;
-	<<Bin1:Sz2/binary,$\n,$\n>> -> Bin1;
-	<<Bin1:Sz1/binary,$\n>> -> Bin1;
-	_ -> Bin
+	<<Bin1:Sz2/binary,$\r,$\n>> -> split_cr(Bin1);
+	<<Bin1:Sz2/binary,$\n,$\n>> -> split_cr(Bin1);
+	<<Bin1:Sz1/binary,$\n>> -> split_cr(Bin1);
+	_ -> split_cr(Bin)
+    end.
+
+split_cr(Bin) ->
+    case binary:split(Bin, <<$\r>>, [global]) of
+	[Bin1] -> Bin1;
+	Bs -> Bs
     end.
 
 
