@@ -27,17 +27,20 @@
 -export([read_version/1]).
 -export([write_memory/3]).
 -export([read_memory/3]).
--export([flash/2]).
+-export([flash/2, flash/3, flash/4, flash_uart/3]).
 -export([patch_segment/3]).
 -export([block_list/2]).
 -export([flash_block/4, flash_block/5]).
+-export([address_from_block/2]).
 -export([lpc_types/0]).
+-export([rambase/1, ramstart/1]).
 %% -compile(export_all).
-
+-export([trim_nl/1]).
 -import(lists, [reverse/1]).
 
 -define(SP, $\s).
 -define(NL, <<$\r,$\n>>).
+-define(DEFAULT_BAUD, 38400).
 -define(is_addr(A), is_integer(A),((A) >= 0),((A) =< 16#ffffffff)).
 -define(i2l(X), integer_to_list((X))).
 
@@ -54,7 +57,7 @@
 	    _ -> ok
 	end).
 
--define(SEGMENT_SIZE, 512).
+-define(SEGMENT_SIZE, 256).
 
 -include("elpcisp.hrl").
 
@@ -64,7 +67,7 @@
 -spec open(Device::string()) ->
 		  {ok,uart:uart()} | {error,term()}.
 open(Device) ->
-    open(Device,38400).
+    open(Device,?DEFAULT_BAUD).
 
 %% @doc
 %%    Open a LPCx decide for flashing
@@ -153,6 +156,8 @@ wait_sync__(U,I,Tmo,Tmo0,Acc) ->
 			<<"Synchronized\r\n",_/binary>> ->
 			    io:format("\n");
 			<<0,"Synchronized\r\n",_/binary>> -> %% buggy?
+			    io:format("\n");
+			<<"Synchronized\r",_/binary>> ->
 			    io:format("\n");
 			_ ->
 			    sync__(U, I-1, Tmo0)
@@ -378,6 +383,21 @@ write_memory(U, Addr, Data)
 write_data(U, Lines, Timeout, Resend) ->
     write_data(U, Lines, Lines, Timeout, Resend).
 
+write_data(U, [Checksum], Lines0, Timeout, Resend) ->
+    Line1 = <<Checksum/binary>>,
+    send(U, [Line1,?NL]),
+    case wait_echo(U, Line1, Timeout) of
+	{ok,<<"OK">>} ->
+	    ok;
+	{ok,<<"RESEND">>} ->
+	    if Resend =:= 0 ->
+		    {error, transmission_failed};
+	       true ->
+		    write_data(U, Lines0, Lines0, Timeout, Resend-1)
+	    end;
+	Error ->
+	    Error
+    end;
 write_data(U, [Line|Lines], Lines0, Timeout, Resend) ->
     Line1 = <<Line/binary>>,
     send(U, [Line1,?NL]),
@@ -481,9 +501,14 @@ wait_echo(U, Cmd, Timeout) ->
     receive
 	{uart,U,Echo} ->
 	    ?dbg2("wait echo <= ~s", [to_qstring(Echo)]),
-	    case trim_nl(Echo) of
-		Cmd -> ok;
-		<<>> -> wait_echo(U, Cmd, Timeout);
+	    Trim = trim_nl(Echo),
+	    case Trim  of
+		[Cmd,Return] -> 
+		    {ok, Return};
+		Cmd -> 
+		    ok;
+		<<>> ->
+		    wait_echo(U, Cmd, Timeout);
 		_ ->
 		    ?dbg("wait_echo got [~p]", [Echo]),
 		    {error, echo}
@@ -735,7 +760,6 @@ rambase(DevType) ->
 	lpc11xx -> ?LPC_RAMBASE_LPC11XX
     end.
 
--ifdef(__not_used__).
 ramstart(DevType) ->    
     case DevType#device_type.variant of
 	lpc2xxx -> ?LPC_RAMSTART_LPC2XXX;
@@ -743,7 +767,6 @@ ramstart(DevType) ->
 	lpc13xx -> ?LPC_RAMSTART_LPC13XX;
 	lpc11xx -> ?LPC_RAMSTART_LPC11XX
     end.
--endif.
 
 info_version(U) ->
     case read_version(U) of
@@ -790,16 +813,23 @@ flash_set_baud_rate(U, Baud) ->
 -spec flash(Device::string()|port(), File::string()) -> ok | {error,term()}.
 
 flash(Device, File) when is_list(Device), is_list(File) ->
-    case open(Device) of
+    flash(Device, File, ?DEFAULT_BAUD).
+
+flash(Device, File, Baud) ->
+    flash(Device, File, Baud, -1).
+
+flash(Device, File, Baud, Addr) 
+  when is_list(Device), is_list(File),is_integer(Baud),is_integer(Addr) ->
+    case open(Device,Baud) of
 	{ok,U} ->
 	    case sync(U, 30) of
 		{ok,_} ->
 		    %% fixme: turn off echo, find better baud rate
 		    flash_dump_info(U),
-		    flash_set_baud_rate(U, 38400),
+		    flash_set_baud_rate(U,Baud),
 		    case unlock(U) of
 			{ok,_} ->
-			    try flash(U, File) of
+			    try flash_uart(U, File, Addr) of
 				ok -> 
 				    case go(U, 0) of
 					{ok,_} -> ok;
@@ -822,14 +852,24 @@ flash(Device, File) when is_list(Device), is_list(File) ->
 	Error ->
 	    io:format("flash error (open): ~p\n", [Error]),
 	    Error
-    end;
-flash(U, File) when is_port(U), is_list(File) ->
+    end.
+
+flash_uart(U, File, Addr) when is_port(U), is_list(File), is_integer(Addr) ->
     %% U must be synced and unlocked
     case filename:extension(File) of
 	".ihex" ->
 	    case elpcisp_ihex:load(File) of
 		{ok,AddrLines} ->
 		    flash_data(U, AddrLines);
+		Error ->
+		    io:format("unable load file ~s: ~p\n", [File, Error]),
+		    Error
+	    end;
+	".bin" ->
+	    case file:read_file(File) of
+		{ok,Data} ->
+		    Addr0 = if Addr >= 0 -> Addr; true -> 0 end,
+		    flash_data(U, [{Addr0,Data}]);
 		Error ->
 		    io:format("unable load file ~s: ~p\n", [File, Error]),
 		    Error
@@ -926,3 +966,9 @@ find_block(Addr, SectorTable) ->
 find_block(Addr, I, [Size|_]) when Addr < Size -> {I,Size};
 find_block(Addr, I, [Size|More]) -> find_block(Addr-Size, I+1, More).
 
+-spec address_from_block(integer(), #device_type{}) -> integer().
+address_from_block(Block, DevType) ->
+    address_from_block_(Block, 0, DevType#device_type.sectorTable).
+address_from_block_(0, Addr, _) -> Addr;
+address_from_block_(Block, Addr, [Size|More]) -> 
+    address_from_block_(Block-1, Addr+Size, More).

@@ -32,7 +32,15 @@ main(Opts) ->
 		    io:format("elpcisp open (sync): ~p\n", [Error])
 	    end;
 	{Device,File} ->
-	    case elpcisp:flash(Device, File) of
+	    Baud = case get(baud) of
+		       B when is_integer(B), B>0 -> B;
+		       _ -> 38400
+		   end,
+	    Addr = case get(addr) of
+		       A when is_integer(A), A>=0 -> A;
+		       _ -> -1
+		   end,
+	    case elpcisp:flash(Device, File, Baud, Addr) of
 		ok -> ok;
 		{error,enoent} ->
 		    case filelib:is_file(File) of
@@ -40,11 +48,9 @@ main(Opts) ->
 			    io:format("elpcisp: can not open device ~s\n", [Device]);
 			false ->
 			    io:format("elpcisp: can not open hex file ~s\n", [File])
-		    end,
-		    usage();
+		    end;
 		{error,Reason} ->
-		    io:format("elpcisp: error ~p\n", [Reason]),
-		    usage()
+		    io:format("elpcisp: error ~p\n", [Reason])
 	    end
     end.
 	    
@@ -57,6 +63,12 @@ options(["--control" | Opts], Device) ->
     options(Opts, Device);
 options(["-c" | Opts], Device) ->
     put(control, true),  %% FIXME
+    options(Opts, Device);
+options(["--addr", Addr | Opts], Device) ->
+    put(addr, to_integer(Addr)),
+    options(Opts, Device);
+options(["-a", Addr | Opts], Device) ->
+    put(addr, to_integer(Addr)),
     options(Opts, Device);
 options(["--controlswap" | Opts], Device) ->
     put(control_swap, true),  %% FIXME
@@ -77,10 +89,10 @@ options(["-d" | Opts], Device) ->
     end,
     options(Opts, Device);
 options(["--baudrate", Rate | Opts], Device) ->
-    put(baud, list_to_integer(Rate)),
+    put(baud, to_integer(Rate)),
     options(Opts, Device);
 options(["-b", Rate | Opts], Device) ->
-    put(baud, list_to_integer(Rate)),
+    put(baud, to_integer(Rate)),
     options(Opts, Device);
 options([[$-|Opt] | _Opts], _Device) ->
     io:format("unknown option ~s\n", [Opt]),
@@ -92,8 +104,14 @@ options([File], Device) ->
 options(_, _Device) ->
     usage().
 
+to_integer("0x" ++ Rest) ->  list_to_integer(Rest, 16);
+to_integer("0X" ++ Rest) ->  list_to_integer(Rest, 16);
+to_integer("0b" ++ Rest) ->  list_to_integer(Rest, 2);
+to_integer("0B" ++ Rest) ->  list_to_integer(Rest, 2);
+to_integer(List) -> list_to_integer(List).
+
 usage() ->
-    io:format("elpcisp: usage elpcisp <options> hex-file\n"),
+    io:format("elpcisp: usage elpcisp <options> hex|bin-file\n"),
     io:format("OPTIONS\n"),
     io:format("  --control           DTR+RTS    reset + isp\n"),
     io:format("  --controlinv        /DTR+/RTS  reset + isp\n"),
@@ -102,8 +120,10 @@ usage() ->
     io:format("  --debug             turn on debugging\n"),
     io:format("  --debug2            turn on hard debugging\n"),
     io:format("  --baudrate <rate>   set baud rate\n"),
+    io:format("  --addr <addr>       start address (bin file)\n"),
     io:format("  -c                  DTR+RTS reset + isp\n"),
     io:format("  -d                  turn on debugging\n"),
     io:format("  -D <device>         set device name\n"),
     io:format("  -b <rate>           set baud rate\n"),
+    io:format("  -a <addr>           start address (bin file)\n"),
     erlang:halt(1).
