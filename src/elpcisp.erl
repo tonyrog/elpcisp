@@ -937,7 +937,7 @@ flash_block(U, DevType, Addr, Data, SegmentSize, Fun) ->
     {ok,_} = prepare_sector(U, Block, Block),
     {ok,_} = copy(U, Addr, Base, SegmentSize),
     Fun(Addr+SegmentSize),
-    flash_block(U, DevType, Addr+SegmentSize, SegmentSize, Data1, Fun).
+    flash_block(U, DevType, Addr+SegmentSize, Data1, SegmentSize, Fun).
 
 patch_segment(0, DevType, Segment) -> %% lpc2xxx
     if DevType#device_type.variant  =:= lpc2xxx ->
