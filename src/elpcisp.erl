@@ -117,7 +117,8 @@ sync_osc(U, N, Tmo, Osc) ->
     uart:setopts(U, [{active,true},{packet,0}]),
     uart:flush(U, both),
     flush(U),
-    case sync__(U,N,Tmo) of
+    Silent = get(silent),
+    case sync__(U,N,Tmo,Silent) of
 	ok ->
 	    uart:setopts(U, [{packet,line}]),
 	    case command(U, "Synchronized") of
@@ -138,44 +139,49 @@ flush(U) ->
     end.
 
 %% FIXME!!! Check if already in boot mode!
-sync__(_U, 0, _Tmo) ->
-    io:format("\n"),
+sync__(_U, 0, _Tmo,Silent) ->
+    output(Silent, "\n"),
     {error,no_sync};
-sync__(U, I, Tmo) ->
+sync__(U, I, Tmo, Silent) ->
     enter(U),
-    io:format("#"),
+    output(Silent, "#"),
     send(U, "?"),
-    wait_sync__(U,I,Tmo,Tmo,<<>>).
+    wait_sync__(U,I,Tmo,Tmo,<<>>,Silent).
 
-wait_sync__(U,I,Tmo,Tmo0,Acc) ->
+wait_sync__(U,I,Tmo,Tmo0,Acc,Silent) ->
     receive
 	{uart,U,_Data = <<"?">>} ->
 	    ?dbg2("wait_sync__ <= ~s", [to_qstring(_Data)]),
-	    wait_sync__(U, I, Tmo,Tmo0,Acc);
+	    wait_sync__(U, I, Tmo,Tmo0,Acc, Silent);
 	{uart,U,Data} ->
 	    ?dbg2("wait_sync__  <= ~s", [to_qstring(Data)]),
-	    wait_sync__(U,I,50,Tmo0,<<Acc/binary,Data/binary>>);
+	    wait_sync__(U,I,50,Tmo0,<<Acc/binary,Data/binary>>, Silent);
 	_What ->
 	    ?dbg("What=~p", [_What]),
-	    wait_sync__(U, I,Tmo,Tmo0,Acc)
+	    wait_sync__(U, I,Tmo,Tmo0,Acc,Silent)
     after Tmo ->
 	    if Tmo =:= 50 ->
 		    case Acc of
 			<<"Synchronized\n\n",_/binary>> ->
-			    io:format("\n");
+			    output(Silent, "\n");
 			<<"Synchronized\r\n",_/binary>> ->
-			    io:format("\n");
+			    output(Silent, "\n");
 			<<0,"Synchronized\r\n",_/binary>> -> %% buggy?
-			    io:format("\n");
+			    output(Silent, "\n");
 			<<"Synchronized\r",_/binary>> ->
-			    io:format("\n");
+			    output(Silent, "\n");
 			_ ->
-			    sync__(U, I-1, Tmo0)
+			    sync__(U, I-1, Tmo0, Silent)
 		    end;
 	       true ->
-		    sync__(U, I-1, Tmo0)
+		    sync__(U, I-1, Tmo0, Silent)
 	    end
     end.
+
+output(silent, _) ->
+    ok;
+output(_, String) ->
+    io:put_chars(String).
 
 %% @doc
 %%    Enter programming mode
