@@ -32,7 +32,7 @@
 -export([flash_uart/3, flash_uart/5]).
 -export([patch_segment/3]).
 -export([block_list/2]).
--export([flash_block/4, flahs_block/5, flash_block/6]).
+-export([flash_block/4, flash_block/5, flash_block/6]).
 -export([flash_block_list/3, flash_block_list/5]).
 -export([address_from_block/2]).
 -export([lpc_types/0]).
