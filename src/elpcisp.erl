@@ -27,20 +27,23 @@
 -export([read_version/1]).
 -export([write_memory/3]).
 -export([read_memory/3]).
--export([flash/2, flash/3, flash/4, flash_uart/3]).
+-export([flash/2, flash/3]).
+-export([flash_file/3]).
+-export([flash_uart/3, flash_uart/5]).
 -export([patch_segment/3]).
 -export([block_list/2]).
--export([flash_block/4, flash_block/5]).
+-export([flash_block/4, flahs_block/5, flash_block/6]).
+-export([flash_block_list/3, flash_block_list/5]).
 -export([address_from_block/2]).
 -export([lpc_types/0]).
 -export([rambase/1, ramstart/1]).
+-export([load_firmware/1, load_firmware/2]).
 %% -compile(export_all).
 -export([trim_nl/1]).
 -import(lists, [reverse/1]).
 
 -define(SP, $\s).
 -define(NL, <<$\r,$\n>>).
--define(DEFAULT_BAUD, 38400).
 -define(is_addr(A), is_integer(A),((A) >= 0),((A) =< 16#ffffffff)).
 -define(i2l(X), integer_to_list((X))).
 
@@ -57,7 +60,14 @@
 	    _ -> ok
 	end).
 
--define(SEGMENT_SIZE, 256).
+-define(DEFAULT_BAUD, 38400).
+-define(DEFAULT_CONTROL, false).
+-define(DEFAULT_CONTROL_INV, false).
+-define(DEFAULT_CONTROL_SWAP, false).
+-define(DEFAULT_SYNC_RETRY, 20).
+-define(DEFAULT_SYNC_TMO, 2000).
+-define(DEFAULT_SEGMENT_SIZE, 256).
+-define(DEFAULT_OSCILLATOR, 12000).
 
 -include("elpcisp.hrl").
 
@@ -810,26 +820,46 @@ flash_set_baud_rate(U, Baud) ->
 %% @doc
 %%    Flash a firmware ihex-image from file onto a device
 %% @end
--spec flash(Device::string()|port(), File::string()) -> ok | {error,term()}.
+-spec flash(Device::string(), File::string()) -> ok | {error,term()}.
 
 flash(Device, File) when is_list(Device), is_list(File) ->
     flash(Device, File, ?DEFAULT_BAUD).
 
-flash(Device, File, Baud) ->
-    flash(Device, File, Baud, -1).
+flash(Device, Filename, Baud) ->
+    flash_file(Device, Filename, 
+	       #{ baud => Baud,
+		  flash_baud => Baud,
+		  flash_cb => fun(_) -> ok end,
+		  segment_size => ?DEFAULT_SEGMENT_SIZE,
+		  addr => 0,
+		  sync_retry => 20,
+		  sync_tmo => 2000,
+		  oscillator => 12000,
+		  control => false,
+		  control_inv => false,
+		  control_swap => false
+		}).
 
-flash(Device, File, Baud, Addr) 
-  when is_list(Device), is_list(File),is_integer(Baud),is_integer(Addr) ->
-    case open(Device,Baud) of
+flash_file(Device, Filename, Options) 
+  when is_list(Device), is_list(Filename), is_map(Options) ->
+    case open(Device,maps:get(baud, Options)) of
 	{ok,U} ->
-	    case sync(U, 30) of
+	    put(control, maps:get(control, Options, ?DEFAULT_CONTROL)),
+	    put(control_inv, maps:get(control_inv, Options, ?DEFAULT_CONTROL_INV)),
+	    put(control_swap, maps:get(control_swap, Options, ?DEFAULT_CONTROL_SWAP)),
+	    SyncRetry = maps:get(sync_retry,Options,?DEFAULT_SYNC_RETRY),
+	    SyncTmo = maps:get(sync_tmo,Options,?DEFAULT_SYNC_TMO),
+	    Oscillator = maps:get(oscillator,Options,?DEFAULT_OSCILLATOR),
+	    SegmentSize = maps:get(segment_size,Options,?DEFAULT_SEGMENT_SIZE),
+	    case sync_osc(U, SyncRetry, SyncTmo, integer_to_list(Oscillator)) of
 		{ok,_} ->
 		    %% fixme: turn off echo, find better baud rate
 		    flash_dump_info(U),
-		    flash_set_baud_rate(U,Baud),
+		    flash_set_baud_rate(U,maps:get(flash_baud,Options)),
 		    case unlock(U) of
 			{ok,_} ->
-			    try flash_uart(U, File, Addr) of
+			    #{ addr := Addr, flash_cb := Fun } = Options,
+			    try flash_uart(U,Filename,Addr,SegmentSize,Fun) of
 				ok -> 
 				    case go(U, 0) of
 					{ok,_} -> ok;
@@ -854,64 +884,60 @@ flash(Device, File, Baud, Addr)
 	    Error
     end.
 
-flash_uart(U, File, Addr) when is_port(U), is_list(File), is_integer(Addr) ->
+flash_uart(U, Filename, Addr) ->
+    flash_uart(U, Filename, Addr, ?DEFAULT_SEGMENT_SIZE, fun(_) -> ok end).
+flash_uart(U, Filename, Addr, SegmentSize, Fun) 
+  when is_port(U), is_list(Filename), is_integer(Addr), is_function(Fun, 1) ->
     %% U must be synced and unlocked
-    case filename:extension(File) of
-	".ihex" ->
-	    case elpcisp_ihex:load(File) of
-		{ok,AddrLines} ->
-		    flash_data(U, AddrLines);
-		Error ->
-		    io:format("unable load file ~s: ~p\n", [File, Error]),
-		    Error
-	    end;
-	".bin" ->
-	    case file:read_file(File) of
-		{ok,Data} ->
-		    Addr0 = if Addr >= 0 -> Addr; true -> 0 end,
-		    flash_data(U, [{Addr0,Data}]);
-		Error ->
-		    io:format("unable load file ~s: ~p\n", [File, Error]),
-		    Error
-	    end;
-	Ext ->
-	    {error,{unsupported,Ext}}
+    case load_firmware(Filename, Addr) of
+	{ok,AddrLines} ->
+	    flash_data(U, AddrLines, SegmentSize, Fun);
+	Error ->
+	    io:format("unable load file ~s: ~p\n", [Filename, Error]),
+	    Error
     end.
 
-flash_data(U, AddrLines) ->
+flash_data(U, AddrLines, SegmentSize, Fun) ->
     case read_device_type(U) of
 	{ok,DevType} ->
 	    BlockList = block_list(AddrLines, DevType),
-	    flash_block_list(U, DevType, BlockList);
+	    flash_block_list(U, DevType, BlockList, SegmentSize, Fun);
 	Error ->
 	    Error
     end.
 
-
-flash_block_list(U, DevType, [{Start,StartBlock,EndBlock,Data}|Bs]) ->
+flash_block_list(U, DevType, BlockList) ->
+    flash_block_list(U, DevType, BlockList, 
+		     ?DEFAULT_SEGMENT_SIZE, fun(_) -> ok end).
+flash_block_list(U, DevType, [{Start,StartBlock,EndBlock,Data}|Bs],
+		 SegmentSize, Fun) ->
     {ok,_} = prepare_sector(U, StartBlock, EndBlock),
     {ok,_} = erase_sector(U, StartBlock, EndBlock),
-    flash_block(U, DevType, Start, Data),
-    flash_block_list(U, DevType, Bs);
-flash_block_list(_U, _DevType, []) ->
+    flash_block(U, DevType, Start, Data, SegmentSize, Fun),
+    flash_block_list(U, DevType, Bs, SegmentSize, Fun);
+flash_block_list(_U, _DevType, [], _SegmentSize, _Fun) ->
     ok.
 
 flash_block(U, DevType, Addr, Data) ->
-    flash_block(U, DevType, Addr, Data, fun(_) -> io:format(".") end).
-
-flash_block(_U, _DevType, _Addr, <<>>, _Fun) ->
-    ok;
+    flash_block(U, DevType, Addr, Data, 
+		?DEFAULT_SEGMENT_SIZE, fun(_) -> io:format(".") end).
 flash_block(U, DevType, Addr, Data, Fun) ->
-    {Segment,Data1} = get_segment(Data, ?SEGMENT_SIZE),
+    flash_block(U, DevType, Addr, Data, ?DEFAULT_SEGMENT_SIZE, Fun).
+
+
+flash_block(_U, _DevType, _Addr, <<>>, _SegmentSize, _Fun) ->
+    ok;
+flash_block(U, DevType, Addr, Data, SegmentSize, Fun) ->
+    {Segment,Data1} = get_segment(Data, SegmentSize),
     Segment1 = patch_segment(Addr, DevType, Segment),
     {Block,_BlockSize} = find_block(Addr, DevType#device_type.sectorTable),
     ?dbg("Write: ~8.16.0B [~w:~w]", [Addr,Block,_BlockSize]),
     Base = rambase(DevType),
     ok = write_memory(U, Base, Segment1),
     {ok,_} = prepare_sector(U, Block, Block),
-    {ok,_} = copy(U, Addr, Base, ?SEGMENT_SIZE),
-    Fun(Addr+?SEGMENT_SIZE),
-    flash_block(U, DevType, Addr+?SEGMENT_SIZE, Data1, Fun).
+    {ok,_} = copy(U, Addr, Base, SegmentSize),
+    Fun(Addr+SegmentSize),
+    flash_block(U, DevType, Addr+SegmentSize, SegmentSize, Data1, Fun).
 
 patch_segment(0, DevType, Segment) -> %% lpc2xxx
     if DevType#device_type.variant  =:= lpc2xxx ->
@@ -932,13 +958,12 @@ patch_segment(0, DevType, Segment) -> %% lpc2xxx
 patch_segment(_Addr,_DevType,Segment) -> 
     Segment.
 
-    
-get_segment(Data, Len) ->
+get_segment(Data, SegmentSize) ->
     case Data of
-	<<Segment:Len/binary, Data1/binary>> ->
+	<<Segment:SegmentSize/binary, Data1/binary>> ->
 	    {Segment,Data1};
 	Segment ->
-	    Pad = (?SEGMENT_SIZE - byte_size(Segment)),
+	    Pad = (SegmentSize - byte_size(Segment)),
 	    {<<Segment/binary, 0:Pad/unit:8>>, <<>>}
     end.
 %%
@@ -972,3 +997,23 @@ address_from_block(Block, DevType) ->
 address_from_block_(0, Addr, _) -> Addr;
 address_from_block_(Block, Addr, [Size|More]) -> 
     address_from_block_(Block-1, Addr+Size, More).
+
+%% Load firmware from file .ihex or .bin
+load_firmware(Filename) ->
+    load_firmware(Filename,0).
+load_firmware(Filename, Addr) ->
+    case filename:extension(Filename) of
+	".ihex" -> %% offset with Addr?
+	    elpcisp_ihex:load(Filename);
+	".bin" ->
+	    case file:read_file(Filename) of
+		{ok,Data} ->
+		    Addr0 = if Addr >= 0 -> Addr; true -> 0 end,
+		    {ok, [{Addr0,Data}]};
+		Error ->
+		    io:format("unable load file ~s: ~p\n", [Filename, Error]),
+		    Error
+	    end;
+	Ext ->
+	    {error,{unsupported,Ext}}
+    end.
